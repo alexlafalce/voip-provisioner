@@ -97,6 +97,11 @@ class GDSGenerator(BaseGenerator):
 
     def generate_config(self, settings: dict[str, Any]) -> str:
         return self.render_template(self.CONFIG_TEMPLATE, **settings)
+
+    def generate_phonebook(
+        self, entries: list[dict[str, str]], phonebook_name: str = "Directory"
+    ) -> str:
+        raise NotImplementedError("GDS37xx door panels don't support a phonebook in this integration")
 ```
 
 - [ ] **Step 3: Export it**
@@ -237,9 +242,25 @@ from .generators import FanvilGenerator, GDSGenerator, GrandstreamGenerator, Yea
     generators["grandstream_gds"] = GDSGenerator(templates_dir)
 ```
 
-3. In `_detect()`, add the `"gds"` branch BEFORE the generic grandstream check (order matters — `"grandstream_gds3710"` contains both `"grandstream"` and `"gds"`, so `"gds"` must be checked first or it always falls into the GXP branch):
+3. In `_detect()`: **found during implementation** — the obvious fix (add a
+   `"gds"` elif branch inside the existing model-string block, after the OUI
+   check) does NOT work, because GDS37xx panels share the same MAC OUI blocks
+   as GXP/GRP phones (both are Grandstream Networks devices using OUIs like
+   `000B82`). `detect_vendor(mac, oui_map)` runs FIRST and matches on OUI
+   alone, returning `"grandstream"` before the model string is ever
+   consulted — the model-string branch only runs `if not vendor`, which is
+   never true for a Grandstream MAC. The model string is the ONLY thing that
+   can distinguish a GDS3710 from a GXP1610 sharing the same OUI block, so
+   the `"gds"` check must run BEFORE the OUI check, not after:
 ```python
 def _detect(mac: str, model: str, config) -> str | None:
+    # Model-string check for "gds" runs BEFORE OUI detection: GDS37xx door
+    # panels share the same MAC OUI blocks as GXP/GRP phones (both are
+    # Grandstream Networks devices), so OUI alone can't distinguish the
+    # product family — only the model string can.
+    if "gds" in model.lower():
+        return "grandstream_gds"
+
     vendor = detect_vendor(mac, _build_oui_map(config))
     if not vendor:
         m = model.lower()
@@ -247,8 +268,6 @@ def _detect(mac: str, model: str, config) -> str | None:
             vendor = "yealink"
         elif "fanvil" in m:
             vendor = "fanvil"
-        elif "gds" in m:
-            vendor = "grandstream_gds"
         elif "grandstream" in m or "gxp" in m or "grp" in m or "ht" in m:
             vendor = "grandstream"
     return vendor
@@ -285,37 +304,61 @@ git commit -m "feat(server): register GDS37xx provisioning route and model detec
 ### Task 3: Frontend model option
 
 **Files:**
-- Modify: `frontend/src/pages/...` (the phone-creation form — locate the file containing the existing `grandstream_gxp1610` etc. `<option>` list; it is NOT in the Annuntia repo, it's this repo's own standalone admin UI under `frontend/src/pages/`)
+- Modify: `frontend/src/components/phones/PhoneForm.tsx`
 
 **Interfaces:**
 - Consumes: nothing new.
 - Produces: nothing consumed by other tasks — this is a leaf UI change.
 
-- [ ] **Step 1: Locate the model list**
+**Correction from initial design:** this repo's own standalone admin UI is a
+React/TSX app (`frontend/src/`, not Vue — the earlier Vue-based
+`ProvisioningView.vue` with the `grandstream_gxp1610` etc. option list lives
+in the separate Annuntia repo, which is the UI actually used operationally
+via its provisioner proxy; this repo's own React UI is a secondary/standalone
+surface). Its model `<select>` in `PhoneForm.tsx` only had `yealink_t23g` and
+`fanvil_v64` — Grandstream was never added here even for GXP, despite the
+generator supporting it.
 
-```bash
-grep -rn "grandstream_gxp1610" /home/administrator/voip-provisioner/frontend/src/
+- [ ] **Step 1: Add the GDS3710 option**
+
+In `frontend/src/components/phones/PhoneForm.tsx`, the model `<select>`:
+```tsx
+            <select
+              {...register('model')}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Select model</option>
+              <option value="yealink_t23g">Yealink T23G</option>
+              <option value="fanvil_v64">Fanvil V64</option>
+            </select>
+```
+becomes:
+```tsx
+            <select
+              {...register('model')}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Select model</option>
+              <option value="yealink_t23g">Yealink T23G</option>
+              <option value="fanvil_v64">Fanvil V64</option>
+              <option value="grandstream_gds3710">Grandstream GDS3710 (Door Panel)</option>
+            </select>
 ```
 
-This prints the exact file and line. Read that file's surrounding context (the full `<select>`/options block and any JS object mapping model values to display labels, mirroring the pattern already found in Annuntia's `ProvisioningView.vue` — this repo's frontend likely has the same two-part pattern: an `<optgroup>` list of `<option>` elements, and a separate `label`-lookup object/map keyed by the same model-value strings).
-
-- [ ] **Step 2: Add the GDS3710 option**
-
-Add a new `<optgroup>` (or extend the existing Grandstream one, matching whatever structure Step 1 revealed) with a `grandstream_gds3710` entry, and add the matching label-lookup entry (e.g. `grandstream_gds3710: 'GDS3710 (Portero)'`) if such a lookup object exists in the file. Follow the exact naming/formatting convention already used by the neighboring GXP/GRP entries in that same file — do not introduce a new convention.
-
-- [ ] **Step 3: Verify the build**
+- [ ] **Step 2: Verify the build**
 
 ```bash
 cd /home/administrator/voip-provisioner/frontend
+npm ci
 npm run build
 ```
 
 Expected: builds cleanly, no new errors or warnings.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add frontend/src/pages/<the file located in Step 1>
+git add frontend/src/components/phones/PhoneForm.tsx
 git commit -m "feat(frontend): add GDS3710 door-panel model option"
 ```
 
