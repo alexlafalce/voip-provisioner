@@ -44,6 +44,11 @@ vendor_oui:
   fanvil:
     - "0C383E"
     - "7C2F80"
+  grandstream:
+    - "000B82"   # Grandstream Networks (main OUI)
+    - "C074AD"   # Grandstream newer devices
+    - "001631"   # Grandstream GXP series
+    - "3C4005"   # Grandstream GRP/GXP series
 
 # Asterisk AMI integration (optional)
 asterisk:

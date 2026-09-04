@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- Grandstream XML Phonebook: {{ phonebook_name }} -->
+<AddressBook>
+{% for entry in entries %}
+  <Contact>
+    <FirstName>{{ entry.name }}</FirstName>
+    <LastName></LastName>
+    <Phone>
+      <phonenumber>{{ entry.number }}</phonenumber>
+      <accountindex>0</accountindex>
+    </Phone>
+  </Contact>
+{% endfor %}
+</AddressBook>

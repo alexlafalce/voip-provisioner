@@ -45,6 +45,7 @@ class VendorOUI(BaseModel):
 
     yealink: list[str] = Field(default_factory=lambda: ["001565", "805E0C", "805EC0"])
     fanvil: list[str] = Field(default_factory=lambda: ["0C383E", "7C2F80"])
+    grandstream: list[str] = Field(default_factory=lambda: ["000B82", "C074AD", "001631", "3C4005"])
 
 
 class AsteriskConfig(BaseModel):

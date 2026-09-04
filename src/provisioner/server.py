@@ -13,7 +13,7 @@ from fastapi.responses import PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .config import Config, get_config, load_config, set_config
-from .generators import FanvilGenerator, YealinkGenerator
+from .generators import FanvilGenerator, GrandstreamGenerator, YealinkGenerator
 from .generators.base import BaseGenerator
 from .inventory import get_inventory, load_inventory, set_inventory
 from .utils import detect_vendor, normalize_mac
@@ -34,7 +34,6 @@ class JSONFormatter(logging.Formatter):
             "message": record.getMessage(),
             "logger": record.name,
         }
-        # Add extra fields
         if hasattr(record, "mac"):
             log_data["mac"] = record.mac
         if hasattr(record, "vendor"):
@@ -61,7 +60,6 @@ def setup_logging(config: Config) -> None:
     logger.setLevel(level)
     logger.addHandler(handler)
 
-    # Also set uvicorn loggers
     for name in ["uvicorn", "uvicorn.access", "uvicorn.error"]:
         logging.getLogger(name).handlers = [handler]
 
@@ -72,25 +70,22 @@ generators: dict[str, BaseGenerator] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan handler - load config and inventory on startup."""
-    # Load configuration
+    """Application lifespan handler."""
     config_path = Path.cwd() / "config.yml"
     config = load_config(config_path)
     set_config(config)
 
-    # Setup logging
     setup_logging(config)
 
-    # Load inventory
     inventory_dir = config.base_dir / config.paths.inventory_dir
     secrets_file = config.base_dir / config.paths.secrets_file
     inventory = load_inventory(inventory_dir, secrets_file if secrets_file.exists() else None)
     set_inventory(inventory)
 
-    # Initialize generators
     templates_dir = config.base_dir / config.paths.templates_dir
     generators["yealink"] = YealinkGenerator(templates_dir)
     generators["fanvil"] = FanvilGenerator(templates_dir)
+    generators["grandstream"] = GrandstreamGenerator(templates_dir)
 
     logger.info(
         f"Provisioner started: {len(inventory.phones)} phones, "
@@ -102,20 +97,16 @@ async def lifespan(app: FastAPI):
     logger.info("Provisioner shutting down")
 
 
-# Create FastAPI app
 app = FastAPI(
     title="VOIP Provisioning Server",
-    description="Generates configuration files for Fanvil V64 and Yealink T23G phones",
-    version="1.0.0",
+    description="Phone provisioner: Yealink T23G, Fanvil V64, Grandstream GXP",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
-# Include API router for REST endpoints
 from .api import api_router
-
 app.include_router(api_router, prefix="/api/v1")
 
-# Serve frontend static files if available
 frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
 if frontend_dist.exists():
     app.mount("/ui", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
@@ -123,7 +114,6 @@ if frontend_dist.exists():
 
 
 def get_client_ip(request: Request) -> str:
-    """Extract client IP from request, handling proxies."""
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
         return forwarded.split(",")[0].strip()
@@ -133,7 +123,6 @@ def get_client_ip(request: Request) -> str:
 def log_provisioning(
     request: Request, mac: str, vendor: str | None, status: str, message: str = ""
 ) -> None:
-    """Log a provisioning request."""
     extra = {
         "mac": mac,
         "vendor": vendor or "unknown",
@@ -146,15 +135,38 @@ def log_provisioning(
         logger.warning(f"Provisioning failed for {mac}: {message}", extra=extra)
 
 
+def _build_oui_map(config) -> dict[str, list[str]]:
+    oui_map: dict[str, list[str]] = {
+        "yealink": config.vendor_oui.yealink,
+        "fanvil": config.vendor_oui.fanvil,
+    }
+    if hasattr(config.vendor_oui, "grandstream"):
+        oui_map["grandstream"] = config.vendor_oui.grandstream
+    return oui_map
+
+
+def _detect(mac: str, model: str, config) -> str | None:
+    vendor = detect_vendor(mac, _build_oui_map(config))
+    if not vendor:
+        m = model.lower()
+        if "yealink" in m:
+            vendor = "yealink"
+        elif "fanvil" in m:
+            vendor = "fanvil"
+        elif "grandstream" in m or "gxp" in m or "grp" in m or "ht" in m:
+            vendor = "grandstream"
+    return vendor
+
+
+# ── Health / Stats ────────────────────────────────────────────────────────────
+
 @app.get("/health")
 async def health_check() -> dict[str, str]:
-    """Health check endpoint."""
     return {"status": "healthy"}
 
 
 @app.get("/stats")
 async def stats() -> dict[str, Any]:
-    """Return provisioning statistics."""
     inventory = get_inventory()
     return {
         "phones_configured": len(inventory.phones),
@@ -163,12 +175,11 @@ async def stats() -> dict[str, Any]:
     }
 
 
+# ── Generic .cfg endpoint (Yealink / Fanvil) ─────────────────────────────────
+
 @app.get("/{mac}.cfg")
 async def provision_auto(mac: str, request: Request) -> Response:
-    """Auto-detect vendor and return configuration.
-
-    The phone vendor is detected from the MAC OUI prefix.
-    """
+    """Auto-detect vendor — returns .cfg for Yealink/Fanvil, redirects GS to XML."""
     try:
         normalized_mac = normalize_mac(mac.replace(".cfg", ""))
     except ValueError as e:
@@ -177,131 +188,112 @@ async def provision_auto(mac: str, request: Request) -> Response:
 
     config = get_config()
     inventory = get_inventory()
-
-    # Look up phone
     phone = inventory.get_phone_by_mac(normalized_mac)
     if not phone:
         log_provisioning(request, normalized_mac, None, "not_found", "Phone not in inventory")
         raise HTTPException(status_code=404, detail="Phone not found in inventory")
 
-    # Detect vendor from MAC or model
-    oui_map = {
-        "yealink": config.vendor_oui.yealink,
-        "fanvil": config.vendor_oui.fanvil,
-    }
-    vendor = detect_vendor(normalized_mac, oui_map)
-
-    # Fall back to model-based detection
-    if not vendor:
-        model_lower = phone.model.lower()
-        if "yealink" in model_lower:
-            vendor = "yealink"
-        elif "fanvil" in model_lower:
-            vendor = "fanvil"
+    vendor = _detect(normalized_mac, phone.model, config)
 
     if not vendor or vendor not in generators:
         log_provisioning(request, normalized_mac, vendor, "error", "Unknown vendor")
         raise HTTPException(status_code=400, detail="Cannot determine phone vendor")
 
-    # Generate config
     generator = generators[vendor]
     settings = inventory.get_effective_settings(phone)
     content = generator.generate_config(settings)
-
     log_provisioning(request, normalized_mac, vendor, "success")
 
-    return PlainTextResponse(
-        content=content,
-        media_type=generator.config_content_type,
-    )
+    return Response(content=content, media_type=generator.config_content_type)
 
+
+# ── Grandstream: cfg{UPPERMAC}.xml ────────────────────────────────────────────
+
+@app.get("/cfg{mac}.xml")
+async def provision_grandstream_upper(mac: str, request: Request) -> Response:
+    """Grandstream native format: cfgAABBCCDDEEFF.xml (uppercase MAC, no separators)."""
+    return await _provision_vendor("grandstream", mac, request)
+
+
+@app.get("/grandstream/{mac}.xml")
+async def provision_grandstream_explicit(mac: str, request: Request) -> Response:
+    """Explicit Grandstream endpoint."""
+    return await _provision_vendor("grandstream", mac, request)
+
+
+# ── Vendor-specific .cfg endpoints ───────────────────────────────────────────
 
 @app.get("/yealink/{mac}.cfg")
 async def provision_yealink(mac: str, request: Request) -> Response:
-    """Return Yealink configuration for specific MAC."""
     return await _provision_vendor("yealink", mac, request)
 
 
 @app.get("/fanvil/{mac}.cfg")
 async def provision_fanvil(mac: str, request: Request) -> Response:
-    """Return Fanvil configuration for specific MAC."""
     return await _provision_vendor("fanvil", mac, request)
 
 
 async def _provision_vendor(vendor: str, mac: str, request: Request) -> Response:
-    """Internal handler for vendor-specific provisioning."""
     try:
-        normalized_mac = normalize_mac(mac.replace(".cfg", ""))
+        normalized_mac = normalize_mac(mac.replace(".cfg", "").replace(".xml", ""))
     except ValueError as e:
         log_provisioning(request, mac, vendor, "error", str(e))
         raise HTTPException(status_code=400, detail=str(e))
 
     inventory = get_inventory()
-
-    # Look up phone
     phone = inventory.get_phone_by_mac(normalized_mac)
     if not phone:
         log_provisioning(request, normalized_mac, vendor, "not_found", "Phone not in inventory")
         raise HTTPException(status_code=404, detail="Phone not found in inventory")
 
     if vendor not in generators:
-        log_provisioning(request, normalized_mac, vendor, "error", "Unknown vendor")
         raise HTTPException(status_code=400, detail=f"Unknown vendor: {vendor}")
 
-    # Generate config
     generator = generators[vendor]
     settings = inventory.get_effective_settings(phone)
     content = generator.generate_config(settings)
-
     log_provisioning(request, normalized_mac, vendor, "success")
 
-    return PlainTextResponse(
-        content=content,
-        media_type=generator.config_content_type,
-    )
+    return Response(content=content, media_type=generator.config_content_type)
 
+
+# ── Phonebooks ────────────────────────────────────────────────────────────────
 
 @app.get("/phonebook.xml")
 async def phonebook_yealink() -> Response:
-    """Return Yealink-format phonebook."""
     return await _phonebook("yealink")
 
 
 @app.get("/fanvil/phonebook.xml")
 async def phonebook_fanvil() -> Response:
-    """Return Fanvil-format phonebook."""
     return await _phonebook("fanvil")
 
 
-async def _phonebook(vendor: str) -> Response:
-    """Internal handler for phonebook generation."""
-    inventory = get_inventory()
+@app.get("/grandstream/phonebook.xml")
+async def phonebook_grandstream() -> Response:
+    return await _phonebook("grandstream")
 
+
+async def _phonebook(vendor: str) -> Response:
+    inventory = get_inventory()
     if vendor not in generators:
         raise HTTPException(status_code=400, detail=f"Unknown vendor: {vendor}")
-
     generator = generators[vendor]
     entries = [{"name": e.name, "number": e.number} for e in inventory.phonebook]
     content = generator.generate_phonebook(entries, inventory.phonebook_name)
+    return Response(content=content, media_type=generator.phonebook_content_type)
 
-    return Response(
-        content=content,
-        media_type=generator.phonebook_content_type,
-    )
 
+# ── Reload ────────────────────────────────────────────────────────────────────
 
 @app.get("/reload")
 async def reload_inventory() -> dict[str, str]:
-    """Reload inventory from disk (useful for config updates)."""
     config = get_config()
     inventory_dir = config.base_dir / config.paths.inventory_dir
     secrets_file = config.base_dir / config.paths.secrets_file
-
     inventory = load_inventory(inventory_dir, secrets_file if secrets_file.exists() else None)
     set_inventory(inventory)
-
     logger.info(f"Inventory reloaded: {len(inventory.phones)} phones")
-
     return {
         "status": "reloaded",
         "phones": str(len(inventory.phones)),
@@ -310,11 +302,8 @@ async def reload_inventory() -> dict[str, str]:
 
 
 def main() -> None:
-    """Entry point for running the server."""
-    # Load config for server settings
     config_path = Path.cwd() / "config.yml"
     config = load_config(config_path)
-
     uvicorn.run(
         "provisioner.server:app",
         host=config.server.host,
