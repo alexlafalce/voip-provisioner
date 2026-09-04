@@ -13,7 +13,7 @@ from fastapi.responses import PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .config import Config, get_config, load_config, set_config
-from .generators import FanvilGenerator, GrandstreamGenerator, YealinkGenerator
+from .generators import FanvilGenerator, GDSGenerator, GrandstreamGenerator, YealinkGenerator
 from .generators.base import BaseGenerator
 from .inventory import get_inventory, load_inventory, set_inventory
 from .utils import detect_vendor, normalize_mac
@@ -86,6 +86,7 @@ async def lifespan(app: FastAPI):
     generators["yealink"] = YealinkGenerator(templates_dir)
     generators["fanvil"] = FanvilGenerator(templates_dir)
     generators["grandstream"] = GrandstreamGenerator(templates_dir)
+    generators["grandstream_gds"] = GDSGenerator(templates_dir)
 
     logger.info(
         f"Provisioner started: {len(inventory.phones)} phones, "
@@ -146,6 +147,13 @@ def _build_oui_map(config) -> dict[str, list[str]]:
 
 
 def _detect(mac: str, model: str, config) -> str | None:
+    # Model-string check for "gds" runs BEFORE OUI detection: GDS37xx door
+    # panels share the same MAC OUI blocks as GXP/GRP phones (both are
+    # Grandstream Networks devices), so OUI alone can't distinguish the
+    # product family — only the model string can.
+    if "gds" in model.lower():
+        return "grandstream_gds"
+
     vendor = detect_vendor(mac, _build_oui_map(config))
     if not vendor:
         m = model.lower()
@@ -219,6 +227,13 @@ async def provision_grandstream_upper(mac: str, request: Request) -> Response:
 async def provision_grandstream_explicit(mac: str, request: Request) -> Response:
     """Explicit Grandstream endpoint."""
     return await _provision_vendor("grandstream", mac, request)
+
+
+@app.get("/grandstream_gds/{mac}.xml")
+async def provision_grandstream_gds(mac: str, request: Request) -> Response:
+    """Grandstream GDS37xx door-panel endpoint — separate P-value namespace
+    from GXP phones, see GDSGenerator."""
+    return await _provision_vendor("grandstream_gds", mac, request)
 
 
 # ── Vendor-specific .cfg endpoints ───────────────────────────────────────────

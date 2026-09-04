@@ -54,6 +54,13 @@ def test_environment():
                     "display_name": "Test Fanvil",
                     "password": "fanvilpass",
                 },
+                {
+                    "mac": "00:0B:82:AA:BB:CC",
+                    "model": "grandstream_gds3710",
+                    "extension": "0010010000",
+                    "display_name": "Test GDS3710",
+                    "password": "gdspass",
+                },
             ],
         }
 
@@ -117,6 +124,22 @@ SIP1 Server Address = {{ pbx_server }}
 </FanvilIPPhoneDirectory>
 """)
 
+        # Grandstream GDS templates
+        gds_dir = tpl_dir / "grandstream_gds"
+        gds_dir.mkdir()
+
+        with open(gds_dir / "cfg.xml.j2", "w") as f:
+            f.write("""<?xml version="1.0" encoding="UTF-8" ?>
+<gs_provision version="1">
+  <config version="1">
+    <P402>{{ pbx_server }}</P402>
+    <P404>{{ extension }}</P404>
+    <P406>{{ password }}</P406>
+    <P407>{{ display_name }}</P407>
+  </config>
+</gs_provision>
+""")
+
         yield tmpdir
 
 
@@ -154,7 +177,7 @@ class TestStatsEndpoint:
         response = client.get("/stats")
         assert response.status_code == 200
         data = response.json()
-        assert data["phones_configured"] == 2
+        assert data["phones_configured"] == 3
         assert data["phonebook_entries"] == 2
 
 
@@ -188,6 +211,28 @@ class TestVendorSpecificProvision:
         response = client.get("/fanvil/0c383e112233.cfg")
         assert response.status_code == 200
         assert "<< VOIP CONFIG FILE >>" in response.text
+
+
+class TestGDSProvision:
+    """Tests for the GDS37xx door-panel provisioning endpoint."""
+
+    def test_gds_endpoint(self, client):
+        response = client.get("/grandstream_gds/000b82aabbcc.xml")
+        assert response.status_code == 200
+        assert "<P404>0010010000</P404>" in response.text
+        assert "<P406>gdspass</P406>" in response.text
+
+    def test_gds_auto_detect_by_model(self, client):
+        """provision_auto (/{mac}.cfg) looks up vendor via _detect() and
+        serves whatever generator matches — it has no special-case that
+        excludes Grandstream despite its docstring's "redirects GS to XML"
+        phrasing (that describes operational intent, not existing code).
+        Once _detect() routes grandstream_gds3710 to "grandstream_gds" (a
+        real key in `generators`), this endpoint serves it like any other
+        vendor."""
+        response = client.get("/000b82aabbcc.cfg")
+        assert response.status_code == 200
+        assert "<P404>0010010000</P404>" in response.text
 
 
 class TestPhonebook:
