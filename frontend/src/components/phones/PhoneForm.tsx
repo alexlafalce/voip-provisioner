@@ -158,6 +158,7 @@ export default function PhoneForm({ phone, onClose }: PhoneFormProps) {
               <option value="">Select model</option>
               <option value="yealink_t23g">Yealink T23G</option>
               <option value="fanvil_v64">Fanvil V64</option>
+              <option value="grandstream_gds3710">Grandstream GDS3710 (Door Panel)</option>
             </select>
             {errors.model && (
               <p className="mt-1 text-sm text-red-600">{errors.model.message}</p>
