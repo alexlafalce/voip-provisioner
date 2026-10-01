@@ -8,10 +8,11 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from .api.auth import expected_api_token, require_api_token
 from .config import Config, get_config, load_config, set_config
 from .generators import FanvilGenerator, GDSGenerator, GrandstreamGenerator, YealinkGenerator
 from .generators.base import BaseGenerator
@@ -93,6 +94,9 @@ async def lifespan(app: FastAPI):
         f"{len(inventory.phonebook)} phonebook entries"
     )
 
+    if not expected_api_token():
+        logger.warning("PROVISIONER_API_TOKEN not set — management API is unauthenticated")
+
     yield
 
     logger.info("Provisioner shutting down")
@@ -173,7 +177,7 @@ async def health_check() -> dict[str, str]:
     return {"status": "healthy"}
 
 
-@app.get("/stats")
+@app.get("/stats", dependencies=[Depends(require_api_token)])
 async def stats() -> dict[str, Any]:
     inventory = get_inventory()
     return {
@@ -301,7 +305,7 @@ async def _phonebook(vendor: str) -> Response:
 
 # ── Reload ────────────────────────────────────────────────────────────────────
 
-@app.get("/reload")
+@app.get("/reload", dependencies=[Depends(require_api_token)])
 async def reload_inventory() -> dict[str, str]:
     config = get_config()
     inventory_dir = config.base_dir / config.paths.inventory_dir

@@ -257,3 +257,33 @@ class TestReload:
         response = client.get("/reload")
         assert response.status_code == 200
         assert response.json()["status"] == "reloaded"
+
+
+class TestApiToken:
+    """Management API requires a bearer token once one is configured."""
+
+    TOKEN = "s3cret-token"
+
+    def test_api_requires_token_when_configured(self, client, monkeypatch):
+        monkeypatch.setenv("PROVISIONER_API_TOKEN", self.TOKEN)
+        assert client.get("/api/v1/phones").status_code == 401
+        bad = {"Authorization": "Bearer wrong"}
+        assert client.get("/api/v1/phones", headers=bad).status_code == 401
+        good = {"Authorization": f"Bearer {self.TOKEN}"}
+        assert client.get("/api/v1/phones", headers=good).status_code == 200
+
+    def test_stats_and_reload_require_token(self, client, monkeypatch):
+        monkeypatch.setenv("PROVISIONER_API_TOKEN", self.TOKEN)
+        assert client.get("/stats").status_code == 401
+        assert client.get("/reload").status_code == 401
+        good = {"Authorization": f"Bearer {self.TOKEN}"}
+        assert client.get("/stats", headers=good).status_code == 200
+
+    def test_device_endpoints_stay_public(self, client, monkeypatch):
+        monkeypatch.setenv("PROVISIONER_API_TOKEN", self.TOKEN)
+        assert client.get("/health").status_code == 200
+        assert client.get("/grandstream_gds/000b82aabbcc.xml").status_code == 200
+
+    def test_api_open_when_no_token_configured(self, client, monkeypatch):
+        monkeypatch.delenv("PROVISIONER_API_TOKEN", raising=False)
+        assert client.get("/api/v1/phones").status_code == 200
