@@ -81,6 +81,7 @@ server:
   port: 8080
   log_level: "info"
   json_logs: true  # For Loki/Promtail integration
+  api_token: ""    # Bearer token for the management API; env PROVISIONER_API_TOKEN overrides it
 
 paths:
   inventory_dir: "inventory"
@@ -111,6 +112,21 @@ asterisk:
   retry_max_attempts: 3
   retry_delay_seconds: 5
 ```
+
+### API Authentication
+
+When `PROVISIONER_API_TOKEN` (or `server.api_token`) is set, the management API requires
+`Authorization: Bearer <token>`:
+
+- Protected: `/api/v1/*`, `/stats`, `/reload`
+- Public (devices cannot send headers): `/health`, `/{mac}.cfg`, `/cfg{mac}.xml`,
+  `/grandstream/…`, `/grandstream_gds/…`, `/yealink/…`, `/fanvil/…`, phonebook XML files
+
+If neither is set, the API stays unauthenticated and a warning is logged at startup.
+The bundled web UI (`/ui`) calls the API without a token, so it stops working once a token
+is configured; manage the inventory through the API (e.g. from the Annuntia admin panel).
+
+Generate a token with `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`.
 
 ### Inventory Configuration
 
