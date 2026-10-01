@@ -22,5 +22,7 @@ def require_api_token(authorization: str | None = Header(default=None)) -> None:
         return
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing API token")
-    if not hmac.compare_digest(authorization.removeprefix("Bearer "), expected):
+    if not hmac.compare_digest(
+        authorization.removeprefix("Bearer ").encode(), expected.encode()
+    ):
         raise HTTPException(status_code=401, detail="Invalid API token")

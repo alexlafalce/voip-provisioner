@@ -272,6 +272,11 @@ class TestApiToken:
         good = {"Authorization": f"Bearer {self.TOKEN}"}
         assert client.get("/api/v1/phones", headers=good).status_code == 200
 
+    def test_non_ascii_token_is_401_not_500(self, client, monkeypatch):
+        monkeypatch.setenv("PROVISIONER_API_TOKEN", self.TOKEN)
+        headers = {"Authorization": "Bearer ñ".encode()}
+        assert client.get("/api/v1/phones", headers=headers).status_code == 401
+
     def test_stats_and_reload_require_token(self, client, monkeypatch):
         monkeypatch.setenv("PROVISIONER_API_TOKEN", self.TOKEN)
         assert client.get("/stats").status_code == 401
