@@ -15,6 +15,7 @@ class ServerConfig(BaseModel):
     port: int = 8080
     log_level: str = "INFO"
     json_logs: bool = True
+    api_token: str = ""  # overridden by env PROVISIONER_API_TOKEN; empty = management API unauthenticated
 
 
 class PathsConfig(BaseModel):
