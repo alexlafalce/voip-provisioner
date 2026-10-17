@@ -24,6 +24,8 @@ class PhoneEntry(BaseModel):
     transport: str | None = None
     label: str | None = None  # Line label, defaults to display_name
     codecs: list[str] | None = None
+    # Door stations: number the call button dials (e.g. the Annuntia Conserje IA)
+    doorbell_number: str | None = None
 
     @field_validator("mac", mode="before")
     @classmethod
@@ -98,6 +100,7 @@ class Inventory(BaseModel):
             "label": phone.line_label,
             "mac": phone.mac,
             "model": phone.model,
+            "doorbell_number": phone.doorbell_number,
         }
         return settings
 

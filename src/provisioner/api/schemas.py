@@ -22,12 +22,21 @@ class CreatePhoneRequest(BaseModel):
     transport: str | None = None
     label: str | None = None
     codecs: list[str] | None = None
+    doorbell_number: str | None = None
 
     @field_validator("mac", mode="before")
     @classmethod
     def normalize_mac_address(cls, v: str) -> str:
         """Normalize MAC address."""
         return normalize_mac(v)
+
+    @field_validator("doorbell_number")
+    @classmethod
+    def doorbell_number_is_dialable(cls, v: str | None) -> str | None:
+        """Digits only: it goes straight into the device config."""
+        if v is not None and not v.isdigit():
+            raise ValueError("doorbell_number must contain only digits")
+        return v
 
 
 class UpdatePhoneRequest(BaseModel):
@@ -42,6 +51,15 @@ class UpdatePhoneRequest(BaseModel):
     transport: str | None = None
     label: str | None = None
     codecs: list[str] | None = None
+    doorbell_number: str | None = None
+
+    @field_validator("doorbell_number")
+    @classmethod
+    def doorbell_number_is_dialable(cls, v: str | None) -> str | None:
+        """Digits only: it goes straight into the device config."""
+        if v is not None and not v.isdigit():
+            raise ValueError("doorbell_number must contain only digits")
+        return v
 
 
 class PhoneResponse(BaseModel):
@@ -56,6 +74,7 @@ class PhoneResponse(BaseModel):
     transport: str | None = None
     label: str | None = None
     codecs: list[str] | None = None
+    doorbell_number: str | None = None
     vendor: str | None = None
     effective_settings: dict[str, Any] | None = None
 

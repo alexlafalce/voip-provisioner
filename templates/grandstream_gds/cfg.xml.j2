@@ -25,6 +25,16 @@
     <!-- Call behavior -->
     <P14580>1</P14580>                     <!-- Disable auto-answer -->
     <P14847>30</P14847>                    <!-- Ring timeout (s) -->
+{% if doorbell_number %}
+
+    <!-- Call button: only the doorbell button works, and it dials this number
+         (Annuntia Conserje IA). Verified against the GDS37xx HTTP API reference. -->
+    <P14827>0</P14827>                     <!-- Doorbell mode: call doorbell number -->
+    <P10470>1</P10470>                     <!-- Doorbell call-out account: account 1 -->
+    <P10462>{{ doorbell_number }}</P10462> <!-- Number called when doorbell pressed -->
+    <P15421>1</P15421>                     <!-- Disable keypad (except doorbell button) -->
+    <P15433>1</P15433>                     <!-- Disable keypad SIP number dialing -->
+{% endif %}
 
   </config>
 </gs_provision>

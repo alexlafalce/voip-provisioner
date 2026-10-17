@@ -106,6 +106,7 @@ async def list_phones() -> PhoneListResponse:
                 transport=phone.transport,
                 label=phone.label,
                 codecs=phone.codecs,
+                doorbell_number=phone.doorbell_number,
                 vendor=vendor,
                 effective_settings=effective_settings,
             )
@@ -144,6 +145,7 @@ async def create_phone(
             transport=phone_data.transport,
             label=phone_data.label,
             codecs=phone_data.codecs,
+            doorbell_number=phone_data.doorbell_number,
         )
 
         # Add phone via repository
@@ -187,6 +189,7 @@ async def create_phone(
             transport=phone.transport,
             label=phone.label,
             codecs=phone.codecs,
+            doorbell_number=phone.doorbell_number,
             vendor=vendor,
             effective_settings=effective_settings,
         )
@@ -253,6 +256,7 @@ async def get_phone(mac: str) -> PhoneResponse:
         transport=phone.transport,
         label=phone.label,
         codecs=phone.codecs,
+        doorbell_number=phone.doorbell_number,
         vendor=vendor,
         effective_settings=effective_settings,
     )
@@ -302,6 +306,8 @@ async def update_phone(
         updates["label"] = phone_data.label
     if phone_data.codecs is not None:
         updates["codecs"] = phone_data.codecs
+    if phone_data.doorbell_number is not None:
+        updates["doorbell_number"] = phone_data.doorbell_number
 
     try:
         repository.update_phone(normalized_mac, updates)
@@ -348,6 +354,7 @@ async def update_phone(
             transport=phone.transport,
             label=phone.label,
             codecs=phone.codecs,
+            doorbell_number=phone.doorbell_number,
             vendor=vendor,
             effective_settings=effective_settings,
         )
