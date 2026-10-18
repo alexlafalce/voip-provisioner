@@ -96,6 +96,8 @@ class YAMLRepository:
             phone_dict["label"] = phone.label
         if phone.codecs:
             phone_dict["codecs"] = phone.codecs
+        if phone.doorbell_number:
+            phone_dict["doorbell_number"] = phone.doorbell_number
 
         phones_data.setdefault("phones", []).append(phone_dict)
 
